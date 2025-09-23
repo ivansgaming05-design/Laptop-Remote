@@ -9,7 +9,8 @@ class PreferencesManager(context: Context) {
 
     companion object {
         private const val KEY_SERVER_URL = "server_url"
-        private const val DEFAULT_SERVER_URL = "http://192.168.1.100:5792"
+        private const val KEY_VIBRATION_ENABLED = "vibration_enabled"
+        private const val DEFAULT_SERVER_URL = "http://100.64.0.1:5792/"
     }
 
     fun setServerUrl(url: String) {
@@ -18,6 +19,14 @@ class PreferencesManager(context: Context) {
 
     fun getServerUrl(): String {
         return prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+    }
+
+    fun setVibrationEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_VIBRATION_ENABLED, enabled).apply()
+    }
+
+    fun getVibrationEnabled(): Boolean {
+        return prefs.getBoolean(KEY_VIBRATION_ENABLED, true)
     }
 
     fun clearAll() {

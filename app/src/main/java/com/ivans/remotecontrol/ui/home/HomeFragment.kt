@@ -22,9 +22,14 @@ import com.ivans.remotecontrol.dialogs.AddFunctionDialog
 import com.ivans.remotecontrol.dialogs.ScreenshotDialog
 import com.ivans.remotecontrol.models.CustomFunction
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.os.VibrationEffect
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModel
 import android.widget.Toast
+import com.ivans.remotecontrol.utils.PreferencesManager
+import android.os.Vibrator
+import android.os.VibratorManager
 
 class HomeFragment : Fragment() {
 
@@ -146,6 +151,24 @@ class HomeFragment : Fragment() {
         // Start connection checking
         checkConnectionStatus()
     }
+    private fun performVibration() {
+        val preferencesManager = PreferencesManager(requireContext())
+        if (preferencesManager.getVibrationEnabled()) {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = requireContext().getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                requireContext().getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(50, 255))
+            } else {
+                vibrator.vibrate(200)
+            }
+        }
+    }
+
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -184,7 +207,7 @@ class HomeFragment : Fragment() {
             ButtonConfig("TeamViewer", "Get remote access info", R.drawable.ic_teamviewer, ButtonType.NORMAL) { viewModel.getTeamViewer() },
             ButtonConfig("Selector", "Activate selection tool", R.drawable.ic_selector, ButtonType.NORMAL) { viewModel.openSelector() },
             ButtonConfig("Hand Tracking", "Start hand tracking", R.drawable.ic_hand, ButtonType.NORMAL) { viewModel.toggleHandTracking() },
-            ButtonConfig("Quit Bot", "Stop remote server", R.drawable.ic_quit, ButtonType.NORMAL) { viewModel.lockSystem() },
+            ButtonConfig("Quit Bot", "Stop remote server", R.drawable.ic_quit, ButtonType.NORMAL) { viewModel.quitServer() },
             ButtonConfig("Lock", "Lock the computer", R.drawable.ic_lock, ButtonType.NORMAL) { viewModel.lockSystem() },
             ButtonConfig("Panic", "Emergency shutdown", R.drawable.ic_panic, ButtonType.DANGER) { confirmPanicAction() },
             ButtonConfig("Add Function", "Create custom function", R.drawable.ic_add, ButtonType.SUCCESS) { showAddFunctionDialog() }
@@ -263,7 +286,9 @@ class HomeFragment : Fragment() {
             textSize = 12f
             isAllCaps = false
 
-            setOnClickListener { config.action() }
+            setOnClickListener {
+                performVibration()
+                config.action() }
         }
     }
 

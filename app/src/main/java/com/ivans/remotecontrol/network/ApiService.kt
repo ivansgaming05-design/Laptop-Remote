@@ -73,6 +73,9 @@ interface ApiService {
     @DELETE("api/custom-functions/{id}")
     suspend fun removeCustomFunction(@Path("id") functionId: Int): Response<Unit>
 
+    @POST("api/quit")
+    suspend fun quitServer(): Response<Map<String, Any>>
+
     // Connection Test
     @GET("api/ping")
     suspend fun ping(): Response<Map<String, String>>
@@ -80,9 +83,10 @@ interface ApiService {
 }
 
 // Data classes for API requests
+// Data classes for API requests
 data class CreateCustomFunctionRequest(
     val name: String,
     val color: String,
     val scriptFile: String,
-    val iconName: String
+    val iconName: String // Add this field
 )

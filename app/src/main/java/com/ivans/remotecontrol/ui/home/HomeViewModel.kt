@@ -343,6 +343,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun quitServer() {
+        viewModelScope.launch {
+            try {
+                _loading.value = true
+                val response = ApiClient.apiService.quitServer() // You'll need to add this to ApiService
+                if (!response.isSuccessful) {
+                    _error.value = "Failed to quit server"
+                }
+            } catch (e: Exception) {
+                _error.value = "Error: ${e.message}"
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
     fun deleteCustomFunction(functionId: String) {
         viewModelScope.launch {
             try {

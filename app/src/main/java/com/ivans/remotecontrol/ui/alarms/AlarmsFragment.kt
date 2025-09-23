@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Switch
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -12,8 +13,9 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.button.MaterialButton
 import android.widget.TextView
-import android.widget.Switch
+import com.google.android.material.materialswitch.MaterialSwitch
 import com.ivans.remotecontrol.R
+import com.ivans.remotecontrol.dialogs.AddAlarmDialog
 import com.ivans.remotecontrol.models.Alarm
 
 class AlarmsFragment : Fragment() {
@@ -42,8 +44,25 @@ class AlarmsFragment : Fragment() {
         recyclerView = view.findViewById(R.id.alarmsRecyclerView)
         addAlarmButton = view.findViewById(R.id.addAlarmFab)
 
+        // Fix this line - change addAlarmFab to addAlarmButton
         addAlarmButton.setOnClickListener {
-            showAddAlarmDialog()
+            AddAlarmDialog.show(parentFragmentManager) { time, days ->
+                // Create an Alarm object from the dialog parameters
+                val timeParts = time.split(":")
+                val hour = timeParts[0].toInt()
+                val minute = timeParts[1].toInt()
+
+                val newAlarm = Alarm(
+                    id = 0, // Server will assign ID
+                    hour = hour,
+                    minute = minute,
+                    time = time,
+                    days = days,
+                    enabled = true
+                )
+
+                viewModel.addAlarm(newAlarm) // Pass the Alarm object
+            }
         }
     }
 
@@ -124,7 +143,7 @@ class AlarmsAdapter(
     inner class AlarmViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val timeText: TextView = itemView.findViewById(R.id.timeText)
         private val daysText: TextView = itemView.findViewById(R.id.daysText)
-        private val enabledSwitch: Switch = itemView.findViewById(R.id.toggleSwitch)
+        private val enabledSwitch: MaterialSwitch = itemView.findViewById(R.id.toggleSwitch)
         private val deleteButton: MaterialButton = itemView.findViewById(R.id.deleteButton)
 
         fun bind(alarm: Alarm) {

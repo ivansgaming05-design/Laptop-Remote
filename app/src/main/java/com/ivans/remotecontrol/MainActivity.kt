@@ -18,9 +18,11 @@ import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.ivans.remotecontrol.network.ApiClient
 import com.ivans.remotecontrol.ui.alarms.AlarmsFragment
 import com.ivans.remotecontrol.ui.home.HomeFragment
 import com.ivans.remotecontrol.ui.settings.SettingsFragment
+import com.ivans.remotecontrol.utils.PreferencesManager
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,9 +33,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Force portrait orientation (except when overridden by dialogs)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        // Auto-load saved server URL
+        val preferencesManager = PreferencesManager(this)
+        val savedUrl = preferencesManager.getServerUrl()
+        ApiClient.updateServerUrl(savedUrl)
 
+        // Rest of your existing code...
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         setupTranslucentNavigation()
         setupViewPager()
         setupBottomNavigation()
@@ -85,17 +91,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSystemBarPaddingSafe() {
-        // Find views safely - only apply padding if they exist
-        val mainContainer = findViewById<View>(R.id.mainContainer)
-        mainContainer?.let { container ->
-            ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
-                val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-                v.updatePadding(top = systemBars.top)
-                insets
-            }
+        // Apply to the entire ViewPager container
+        ViewCompat.setOnApplyWindowInsetsListener(viewPager) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.updatePadding(top = systemBars.top)
+            insets
         }
 
-        // Apply padding to bottom navigation if it exists
+        // Also apply to bottom navigation
         ViewCompat.setOnApplyWindowInsetsListener(bottomNavigation) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.updatePadding(bottom = systemBars.bottom)
