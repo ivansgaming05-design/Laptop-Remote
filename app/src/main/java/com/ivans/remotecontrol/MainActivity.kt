@@ -1,15 +1,18 @@
 package com.ivans.remotecontrol
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
-import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -35,6 +38,10 @@ class MainActivity : AppCompatActivity() {
     private var securityDialog: SecurityDialog? = null
     private var isShowingSecurityDialog = false
 
+    companion object {
+        private const val NOTIFICATION_PERMISSION_CODE = 100
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -43,9 +50,9 @@ class MainActivity : AppCompatActivity() {
         val preferencesManager = PreferencesManager(this)
         val savedUrl = preferencesManager.getServerUrl()
         ApiClient.updateServerUrl(savedUrl)
-        ApiClient.setPreferencesManager(preferencesManager) // Add this line
+        ApiClient.setPreferencesManager(preferencesManager)
 
-        // Rest of your existing code...
+        // Setup UI
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         setupTranslucentNavigation()
         setupViewPager()
@@ -53,8 +60,46 @@ class MainActivity : AppCompatActivity() {
         setupSystemBarPaddingSafe()
         createNotificationChannel()
 
+        // Request notification permission for Android 13+
+        requestNotificationPermission()
+
         // Check if we need authentication on startup
         checkInitialAuthentication()
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                // Request the permission
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_CODE
+                )
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        when (requestCode) {
+            NOTIFICATION_PERMISSION_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    Log.d("MainActivity", "Notification permission granted")
+                } else {
+                    Log.d("MainActivity", "Notification permission denied")
+                }
+            }
+        }
     }
 
     private fun setupTranslucentNavigation() {
@@ -101,14 +146,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupSystemBarPaddingSafe() {
-        // Apply to the entire ViewPager container
         ViewCompat.setOnApplyWindowInsetsListener(viewPager) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.updatePadding(top = systemBars.top)
             insets
         }
 
-        // Also apply to bottom navigation
         ViewCompat.setOnApplyWindowInsetsListener(bottomNavigation) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.updatePadding(bottom = systemBars.bottom)
@@ -121,7 +164,7 @@ class MainActivity : AppCompatActivity() {
             val channel = NotificationChannel(
                 "screenshots",
                 "Screenshots",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH // Changed to HIGH to ensure they show
             ).apply {
                 description = "Screenshot notifications"
                 enableVibration(true)
@@ -134,7 +177,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ================================
-    // AUTHENTICATION METHODS (PUBLIC)
+    // AUTHENTICATION METHODS
     // ================================
 
     private fun checkInitialAuthentication() {
@@ -145,44 +188,41 @@ class MainActivity : AppCompatActivity() {
                     ApiClient.AuthResult.LOCKED,
                     ApiClient.AuthResult.TEMPORARILY_LOCKED -> {
                         showSecurityDialog {
-                            // Authentication successful, continue with app
+                            // Authentication successful
                         }
                     }
                     ApiClient.AuthResult.UNLOCKED -> {
-                        // Already authenticated, continue normally
+                        // Already authenticated
                     }
                     ApiClient.AuthResult.ERROR -> {
-                        // Connection issues, let the app handle it normally
+                        // Connection issues
                     }
                     else -> {
-                        // Other states, continue normally
+                        // Other states
                     }
                 }
             } catch (e: Exception) {
-                // If we can't check auth status, let the app continue
-                // The fragments will handle auth as needed
+                // Let the app continue
             }
         }
     }
 
     fun showSecurityDialog(onUnlocked: () -> Unit) {
         if (isShowingSecurityDialog) {
-            Log.d("MainActivity", "Security dialog already showing, ignoring request")
+            Log.d("MainActivity", "Security dialog already showing")
             return
         }
 
-        // Dismiss any existing dialog first
         securityDialog?.dismissAllowingStateLoss()
         securityDialog = null
 
         isShowingSecurityDialog = true
-        Log.d("MainActivity", "Showing new security dialog")
+        Log.d("MainActivity", "Showing security dialog")
 
         SecurityDialog.show(supportFragmentManager) { sessionToken ->
             isShowingSecurityDialog = false
-            Log.d("MainActivity", "Security dialog callback received")
+            Log.d("MainActivity", "Security dialog completed")
 
-            // Store session token and proceed
             if (sessionToken.isNotEmpty()) {
                 onUnlocked()
             } else {
@@ -191,10 +231,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Add this method to reset the flag if needed
     override fun onResume() {
         super.onResume()
-        // Reset flag if no dialog is actually showing
         if (supportFragmentManager.findFragmentByTag("SecurityDialog") == null) {
             isShowingSecurityDialog = false
         }
@@ -207,28 +245,19 @@ class MainActivity : AppCompatActivity() {
                 if (response.isSuccessful) {
                     val authStatus = response.body()
                     if (authStatus?.locked == true) {
-                        showSecurityDialog {
-                            action()
-                        }
+                        showSecurityDialog { action() }
                     } else {
                         action()
                     }
                 } else {
-                    // Assume locked if we can't check status
-                    showSecurityDialog {
-                        action()
-                    }
+                    showSecurityDialog { action() }
                 }
             } catch (e: Exception) {
-                // On network error, show security dialog
-                showSecurityDialog {
-                    action()
-                }
+                showSecurityDialog { action() }
             }
         }
     }
 
-    // Utility methods for external components
     fun showScreenshotDialog(screenshotId: String) {
         if (!isFinishing && !isDestroyed) {
             findViewById<View>(android.R.id.content).post {
@@ -253,17 +282,14 @@ class MainActivity : AppCompatActivity() {
         return supportFragmentManager.findFragmentByTag("f${viewPager.currentItem}")
     }
 
-    // Handle API calls that require authentication
     fun handleApiCall(action: () -> Unit) {
         checkAuthenticationAndProceed(action)
     }
 
-    // Check if we have a valid session
     fun hasValidSession(): Boolean {
         return ApiClient.hasValidSession()
     }
 
-    // Clear session (for logout functionality)
     fun clearSession() {
         ApiClient.clearSession()
     }

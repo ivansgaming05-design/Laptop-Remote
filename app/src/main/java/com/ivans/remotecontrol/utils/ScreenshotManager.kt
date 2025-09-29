@@ -28,18 +28,48 @@ class ScreenshotManager(private val context: Context) {
     suspend fun downloadAndSaveScreenshot(screenshotUrl: String): Uri? {
         return withContext(Dispatchers.IO) {
             try {
-                // Download the image
+                android.util.Log.d("ScreenshotManager", "Starting download from: $screenshotUrl")
+
+                // Get session token from PreferencesManager
+                val preferencesManager = PreferencesManager(context)
+                val sessionToken = preferencesManager.getSessionToken()
+
+                android.util.Log.d("ScreenshotManager", "Session token exists: ${sessionToken.isNotEmpty()}")
+
+                // Download the image with authentication
                 val client = OkHttpClient()
-                val request = Request.Builder().url(screenshotUrl).build()
+                val requestBuilder = Request.Builder().url(screenshotUrl)
+
+                // Add Authorization header if we have a token
+                if (sessionToken.isNotEmpty()) {
+                    requestBuilder.header("Authorization", "Bearer $sessionToken")
+                    android.util.Log.d("ScreenshotManager", "Added auth header")
+                } else {
+                    android.util.Log.w("ScreenshotManager", "No session token available!")
+                }
+
+                val request = requestBuilder.build()
                 val response = client.newCall(request).execute()
 
-                if (!response.isSuccessful) return@withContext null
+                android.util.Log.d("ScreenshotManager", "Response code: ${response.code}")
+
+                if (!response.isSuccessful) {
+                    android.util.Log.e("ScreenshotManager", "Failed to download: ${response.code}")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Failed to download screenshot: ${response.code}", Toast.LENGTH_LONG).show()
+                    }
+                    return@withContext null
+                }
 
                 val inputStream = response.body?.byteStream() ?: return@withContext null
                 val bitmap = BitmapFactory.decodeStream(inputStream)
 
+                android.util.Log.d("ScreenshotManager", "Bitmap decoded successfully")
+
                 // Save to gallery
                 val savedUri = saveImageToGallery(bitmap)
+
+                android.util.Log.d("ScreenshotManager", "Saved to gallery: $savedUri")
 
                 withContext(Dispatchers.Main) {
                     if (savedUri != null) {
@@ -105,6 +135,18 @@ class ScreenshotManager(private val context: Context) {
     }
 
     private fun showNotification(imageUri: Uri?) {
+        // Check if we have notification permission (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                android.util.Log.w("ScreenshotManager", "Notification permission not granted")
+                return
+            }
+        }
+
         // Create intent that opens the specific image in gallery
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(imageUri, "image/*")
@@ -124,12 +166,14 @@ class ScreenshotManager(private val context: Context) {
             .setContentText("Tap to view screenshot in gallery")
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH) // Makes it pop up
-            .setDefaults(NotificationCompat.DEFAULT_ALL) // Sound + vibration
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
 
         try {
             NotificationManagerCompat.from(context).notify(notificationId, notification)
+        } catch (e: SecurityException) {
+            android.util.Log.e("ScreenshotManager", "Security exception showing notification", e)
         } catch (e: Exception) {
             android.util.Log.e("ScreenshotManager", "Failed to show notification", e)
         }
