@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
@@ -23,11 +24,16 @@ import com.ivans.remotecontrol.ui.alarms.AlarmsFragment
 import com.ivans.remotecontrol.ui.home.HomeFragment
 import com.ivans.remotecontrol.ui.settings.SettingsFragment
 import com.ivans.remotecontrol.utils.PreferencesManager
+import com.ivans.remotecontrol.dialogs.SecurityDialog
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var viewPager: ViewPager2
     private lateinit var bottomNavigation: BottomNavigationView
+    private var securityDialog: SecurityDialog? = null
+    private var isShowingSecurityDialog = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +43,7 @@ class MainActivity : AppCompatActivity() {
         val preferencesManager = PreferencesManager(this)
         val savedUrl = preferencesManager.getServerUrl()
         ApiClient.updateServerUrl(savedUrl)
+        ApiClient.setPreferencesManager(preferencesManager) // Add this line
 
         // Rest of your existing code...
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -45,6 +52,9 @@ class MainActivity : AppCompatActivity() {
         setupBottomNavigation()
         setupSystemBarPaddingSafe()
         createNotificationChannel()
+
+        // Check if we need authentication on startup
+        checkInitialAuthentication()
     }
 
     private fun setupTranslucentNavigation() {
@@ -123,6 +133,101 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ================================
+    // AUTHENTICATION METHODS (PUBLIC)
+    // ================================
+
+    private fun checkInitialAuthentication() {
+        lifecycleScope.launch {
+            try {
+                val authResult = ApiClient.checkAuthStatus()
+                when (authResult) {
+                    ApiClient.AuthResult.LOCKED,
+                    ApiClient.AuthResult.TEMPORARILY_LOCKED -> {
+                        showSecurityDialog {
+                            // Authentication successful, continue with app
+                        }
+                    }
+                    ApiClient.AuthResult.UNLOCKED -> {
+                        // Already authenticated, continue normally
+                    }
+                    ApiClient.AuthResult.ERROR -> {
+                        // Connection issues, let the app handle it normally
+                    }
+                    else -> {
+                        // Other states, continue normally
+                    }
+                }
+            } catch (e: Exception) {
+                // If we can't check auth status, let the app continue
+                // The fragments will handle auth as needed
+            }
+        }
+    }
+
+    fun showSecurityDialog(onUnlocked: () -> Unit) {
+        if (isShowingSecurityDialog) {
+            Log.d("MainActivity", "Security dialog already showing, ignoring request")
+            return
+        }
+
+        // Dismiss any existing dialog first
+        securityDialog?.dismissAllowingStateLoss()
+        securityDialog = null
+
+        isShowingSecurityDialog = true
+        Log.d("MainActivity", "Showing new security dialog")
+
+        SecurityDialog.show(supportFragmentManager) { sessionToken ->
+            isShowingSecurityDialog = false
+            Log.d("MainActivity", "Security dialog callback received")
+
+            // Store session token and proceed
+            if (sessionToken.isNotEmpty()) {
+                onUnlocked()
+            } else {
+                onUnlocked()
+            }
+        }
+    }
+
+    // Add this method to reset the flag if needed
+    override fun onResume() {
+        super.onResume()
+        // Reset flag if no dialog is actually showing
+        if (supportFragmentManager.findFragmentByTag("SecurityDialog") == null) {
+            isShowingSecurityDialog = false
+        }
+    }
+
+    fun checkAuthenticationAndProceed(action: () -> Unit) {
+        lifecycleScope.launch {
+            try {
+                val response = ApiClient.apiService.getAuthStatus()
+                if (response.isSuccessful) {
+                    val authStatus = response.body()
+                    if (authStatus?.locked == true) {
+                        showSecurityDialog {
+                            action()
+                        }
+                    } else {
+                        action()
+                    }
+                } else {
+                    // Assume locked if we can't check status
+                    showSecurityDialog {
+                        action()
+                    }
+                }
+            } catch (e: Exception) {
+                // On network error, show security dialog
+                showSecurityDialog {
+                    action()
+                }
+            }
+        }
+    }
+
     // Utility methods for external components
     fun showScreenshotDialog(screenshotId: String) {
         if (!isFinishing && !isDestroyed) {
@@ -146,6 +251,21 @@ class MainActivity : AppCompatActivity() {
 
     fun getCurrentFragment(): Fragment? {
         return supportFragmentManager.findFragmentByTag("f${viewPager.currentItem}")
+    }
+
+    // Handle API calls that require authentication
+    fun handleApiCall(action: () -> Unit) {
+        checkAuthenticationAndProceed(action)
+    }
+
+    // Check if we have a valid session
+    fun hasValidSession(): Boolean {
+        return ApiClient.hasValidSession()
+    }
+
+    // Clear session (for logout functionality)
+    fun clearSession() {
+        ApiClient.clearSession()
     }
 
     private class ViewPagerAdapter(fragmentActivity: FragmentActivity) :

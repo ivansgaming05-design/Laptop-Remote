@@ -1,6 +1,9 @@
 package com.ivans.remotecontrol.network
 
 import com.ivans.remotecontrol.models.Alarm
+import com.ivans.remotecontrol.models.AuthChallenge
+import com.ivans.remotecontrol.models.AuthStatus
+import com.ivans.remotecontrol.models.AuthUnlockResponse
 import com.ivans.remotecontrol.models.CustomFunction
 import com.ivans.remotecontrol.models.SystemStatus
 import com.ivans.remotecontrol.models.TeamViewerInfo
@@ -76,14 +79,20 @@ interface ApiService {
     @POST("api/quit")
     suspend fun quitServer(): Response<Map<String, Any>>
 
+    @GET("api/auth/status")
+    suspend fun getAuthStatus(): Response<AuthStatus>
+
+    @GET("api/auth/challenge")
+    suspend fun getAuthChallenge(): Response<AuthChallenge>
+
+    @POST("api/auth/unlock")
+    suspend fun unlockServer(@Body request: Map<String, String>): Response<AuthUnlockResponse>
+
     // Connection Test
     @GET("api/ping")
     suspend fun ping(): Response<Map<String, String>>
 
 }
-
-// Data classes for API requests
-// Data classes for API requests
 data class CreateCustomFunctionRequest(
     val name: String,
     val color: String,

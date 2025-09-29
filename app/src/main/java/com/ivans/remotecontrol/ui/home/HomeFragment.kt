@@ -30,6 +30,9 @@ import android.widget.Toast
 import com.ivans.remotecontrol.utils.PreferencesManager
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.util.Log
+import com.ivans.remotecontrol.MainActivity
+import com.ivans.remotecontrol.dialogs.SecurityDialog
 
 class HomeFragment : Fragment() {
 
@@ -56,6 +59,8 @@ class HomeFragment : Fragment() {
 
     private var retryTeamViewerButton: MaterialButton? = null
     private var connectionStatusIndicator: TextView? = null
+
+    private var hasShownAuthDialog = false
 
     companion object {
         private var isPanelExpanded = false
@@ -425,6 +430,20 @@ class HomeFragment : Fragment() {
 
         viewModel.customFunctions.observe(viewLifecycleOwner) { functions ->
             addCustomFunctionButtons(functions)
+        }
+
+        viewModel.authenticationRequired.observe(viewLifecycleOwner) { required ->
+            if (required && !hasShownAuthDialog) {
+                hasShownAuthDialog = true
+                Log.d("HomeFragment", "Authentication required, showing dialog")
+
+                (activity as? MainActivity)?.showSecurityDialog {
+                    hasShownAuthDialog = false
+                    viewModel.clearAuthenticationRequired()
+                    // Retry the last action or refresh data
+                    viewModel.loadSystemStatus()
+                }
+            }
         }
 
         viewModel.error.observe(viewLifecycleOwner) { error ->

@@ -12,9 +12,15 @@ import kotlinx.coroutines.launch
 import android.app.Application
 import com.ivans.remotecontrol.R
 import com.ivans.remotecontrol.utils.ScreenshotManager
+import com.ivans.remotecontrol.utils.PreferencesManager
+import android.util.Log
+import retrofit2.Response
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val preferencesManager = PreferencesManager(application)
+
+    // System Status
     private val _systemStatus = MutableLiveData<SystemStatus>()
     val systemStatus: LiveData<SystemStatus> = _systemStatus
 
@@ -24,44 +30,197 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _customFunctions = MutableLiveData<List<CustomFunction>>()
     val customFunctions: LiveData<List<CustomFunction>> = _customFunctions
 
+    // UI State
     private val _loading = MutableLiveData<Boolean>()
     val loading: LiveData<Boolean> = _loading
 
     private val _error = MutableLiveData<String?>()
     val error: LiveData<String?> = _error
 
+    // Authentication State
+    private val _authenticationRequired = MutableLiveData<Boolean>()
+    val authenticationRequired: LiveData<Boolean> = _authenticationRequired
+
+    private val _connectionStatus = MutableLiveData<ConnectionStatus>()
+    val connectionStatus: LiveData<ConnectionStatus> = _connectionStatus
+
+    // Screenshot
+    private val _screenshotTaken = MutableLiveData<String?>()
+    val screenshotTaken: LiveData<String?> = _screenshotTaken
+
+    private var lastAuthCheck = 0L
+    private val AUTH_CHECK_DEBOUNCE = 2000L
+
     init {
-        loadSystemStatus()
-        loadCustomFunctions()
+        // Set up ApiClient with preferences manager
+        ApiClient.setPreferencesManager(preferencesManager)
+
+        // Load initial data
+        checkConnectionAndLoadData()
     }
 
     fun checkConnection(callback: (Boolean) -> Unit) {
         viewModelScope.launch {
             try {
-                println("HomeViewModel: Testing connection to ${ApiClient.getCurrentUrl()}")
+                Log.d("HomeViewModel", "Testing connection to ${ApiClient.getCurrentUrl()}")
                 val response = ApiClient.apiService.ping()
-                println("HomeViewModel: Connection test result: ${response.isSuccessful}")
-                callback(response.isSuccessful)
+                val isConnected = response.isSuccessful
+                Log.d("HomeViewModel", "Connection test result: $isConnected")
+
+                _connectionStatus.value = if (isConnected) {
+                    ConnectionStatus.CONNECTED
+                } else {
+                    ConnectionStatus.DISCONNECTED
+                }
+
+                callback(isConnected)
             } catch (e: Exception) {
-                println("HomeViewModel: Connection test failed: ${e.message}")
+                Log.e("HomeViewModel", "Connection test failed", e)
+                _connectionStatus.value = ConnectionStatus.ERROR
                 callback(false)
             }
         }
     }
 
-    // System Controls
+    fun checkConnectionAndLoadData() {
+
+        val now = System.currentTimeMillis()
+        if (now - lastAuthCheck < AUTH_CHECK_DEBOUNCE) {
+            Log.d("HomeViewModel", "Auth check debounced")
+            return
+        }
+        lastAuthCheck = now
+
+        viewModelScope.launch {
+            _connectionStatus.value = ConnectionStatus.CONNECTING
+
+            try {
+                // First, test basic connectivity
+                val connectionOk = ApiClient.testConnection()
+                if (!connectionOk) {
+                    _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                    _error.value = "Cannot connect to server"
+                    return@launch
+                }
+
+                // Check authentication status
+                val authResult = ApiClient.checkAuthStatus()
+                when (authResult) {
+                    ApiClient.AuthResult.UNLOCKED -> {
+                        _connectionStatus.value = ConnectionStatus.CONNECTED
+                        loadSystemStatus()
+                        loadCustomFunctions()
+                    }
+                    ApiClient.AuthResult.LOCKED,
+                    ApiClient.AuthResult.TEMPORARILY_LOCKED -> {
+                        _connectionStatus.value = ConnectionStatus.CONNECTED
+                        _authenticationRequired.value = true
+                    }
+                    ApiClient.AuthResult.ERROR -> {
+                        _connectionStatus.value = ConnectionStatus.ERROR
+                        _error.value = "Failed to check authentication status"
+                    }
+                    else -> {
+                        _connectionStatus.value = ConnectionStatus.ERROR
+                        _error.value = "Unknown authentication state"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error checking connection and auth", e)
+                _connectionStatus.value = ConnectionStatus.ERROR
+                _error.value = "Connection error: ${e.message}"
+            }
+        }
+    }
+
+    fun performAuthentication(password: String, callback: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                _loading.value = true
+
+                val authResult = ApiClient.performAuthChallenge(password)
+
+                when (authResult) {
+                    ApiClient.AuthResult.SUCCESS -> {
+                        _authenticationRequired.value = false
+                        _connectionStatus.value = ConnectionStatus.CONNECTED
+
+                        // Load data after successful auth
+                        loadSystemStatus()
+                        loadCustomFunctions()
+
+                        callback(true, null)
+                    }
+                    ApiClient.AuthResult.INVALID_PASSWORD -> {
+                        callback(false, "Incorrect password")
+                    }
+                    ApiClient.AuthResult.TEMPORARILY_LOCKED -> {
+                        val lockoutTime = preferencesManager.getLockoutTimeRemaining()
+                        val minutes = (lockoutTime / 60000).toInt()
+                        callback(false, "Too many failed attempts. Try again in $minutes minutes.")
+                    }
+                    ApiClient.AuthResult.ERROR -> {
+                        callback(false, "Authentication failed. Please try again.")
+                    }
+                    else -> {
+                        callback(false, "Unknown authentication error")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Authentication error", e)
+                callback(false, "Connection error: ${e.message}")
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    private suspend fun <T> executeWithAuthCheck(
+        apiCall: suspend () -> Response<T>,
+        onSuccess: (T) -> Unit = {},
+        onError: (String) -> Unit = { _error.value = it }
+    ): Boolean {
+        return try {
+            val response = apiCall()
+
+            when {
+                response.isSuccessful -> {
+                    response.body()?.let { onSuccess(it) }
+                    true
+                }
+                response.code() == 401 || response.code() == 423 -> {
+                    // Authentication required
+                    _authenticationRequired.value = true
+                    false
+                }
+                else -> {
+                    onError("Request failed: ${response.code()}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("HomeViewModel", "API call failed", e)
+            onError("Network error: ${e.message}")
+            false
+        }
+    }
+
+    // ================================
+    // SYSTEM CONTROLS
+    // ================================
+
     fun toggleNightlight() {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.toggleNightlight()
-                if (response.isSuccessful) {
-                    loadSystemStatus() // Refresh status after action
-                } else {
-                    _error.value = "Failed to toggle night light"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.toggleNightlight() },
+                    onSuccess = {
+                        loadSystemStatus() // Refresh status after action
+                    },
+                    onError = { _error.value = "Failed to toggle night light" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -72,99 +231,81 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.toggleDisplay()
-                if (response.isSuccessful) {
-                    loadSystemStatus()
-                } else {
-                    _error.value = "Failed to toggle display"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.toggleDisplay() },
+                    onSuccess = {
+                        loadSystemStatus()
+                    },
+                    onError = { _error.value = "Failed to toggle display" }
+                )
             } finally {
                 _loading.value = false
             }
         }
     }
-
-    private val _screenshotTaken = MutableLiveData<String?>()
-    val screenshotTaken: LiveData<String?> = _screenshotTaken
 
     fun takeScreenshot() {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.takeScreenshot()
-                if (response.isSuccessful) {
-                    response.body()?.let { responseBody ->
-                        val screenshotId = responseBody["screenshot_id"] as? String
-                        if (screenshotId != null) {
-                            // Save to gallery instead of showing dialog
-                            val serverUrl = ApiClient.getCurrentUrl()
-                            val screenshotUrl = "${serverUrl}api/screenshots/$screenshotId"
 
-                            val screenshotManager = ScreenshotManager(getApplication())
-                            screenshotManager.downloadAndSaveScreenshot(screenshotUrl)
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.takeScreenshot() },
+                    onSuccess = { responseBody ->
+                        responseBody["screenshot_id"]?.let { screenshotId ->
+                            if (screenshotId is String) {
+                                // Save to gallery
+                                val serverUrl = ApiClient.getCurrentUrl()
+                                val screenshotUrl = "${serverUrl}api/screenshots/$screenshotId"
 
-                        } else {
-                            _error.value = "Screenshot taken but no ID received"
+                                val screenshotManager = ScreenshotManager(getApplication())
+                                viewModelScope.launch {
+                                    screenshotManager.downloadAndSaveScreenshot(screenshotUrl)
+                                }
+
+                                _screenshotTaken.value = screenshotId
+                            }
                         }
-                    } ?: run {
-                        _error.value = "Screenshot response body is null"
-                    }
-                } else {
-                    _error.value = "Failed to take screenshot"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+                    },
+                    onError = { _error.value = "Failed to take screenshot" }
+                )
             } finally {
                 _loading.value = false
             }
         }
     }
 
-
     fun getTeamViewer() {
-        android.util.Log.d("HomeViewModel", "getTeamViewer() called")
+        Log.d("HomeViewModel", "getTeamViewer() called")
         viewModelScope.launch {
             try {
                 _loading.value = true
-                android.util.Log.d("HomeViewModel", "Making TeamViewer API call")
-                val response = ApiClient.apiService.getTeamViewer()
-                android.util.Log.d("HomeViewModel", "TeamViewer API response: success=${response.isSuccessful}, code=${response.code()}")
+                Log.d("HomeViewModel", "Making TeamViewer API call")
 
-                if (response.isSuccessful) {
-                    response.body()?.let { teamViewerInfo ->
-                        android.util.Log.d("HomeViewModel", "TeamViewer response body - ID: '${teamViewerInfo.id}', Password: '${teamViewerInfo.password}'")
-
-                        // Always post the info (even if empty) so the UI can decide what to show
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.getTeamViewer() },
+                    onSuccess = { teamViewerInfo ->
+                        Log.d("HomeViewModel", "TeamViewer response - ID: '${teamViewerInfo.id}', Password: '${teamViewerInfo.password}'")
                         _teamViewerInfo.value = teamViewerInfo
 
-                        // Set error message if info is incomplete (this won't show in UI, just for logging)
                         if (teamViewerInfo.id.isEmpty() || teamViewerInfo.password.isEmpty()) {
-                            android.util.Log.d("HomeViewModel", "TeamViewer info incomplete - triggering retry button")
+                            Log.d("HomeViewModel", "TeamViewer info incomplete - triggering retry button")
                             _error.value = "TeamViewer info incomplete"
                         } else {
-                            android.util.Log.d("HomeViewModel", "TeamViewer info complete - showing ID/password buttons")
+                            Log.d("HomeViewModel", "TeamViewer info complete - showing ID/password buttons")
                             _error.value = null
                         }
-                    } ?: run {
-                        // No response body
-                        android.util.Log.d("HomeViewModel", "No TeamViewer response body - showing retry button")
+                    },
+                    onError = {
+                        Log.d("HomeViewModel", "TeamViewer API failed - showing retry button")
                         _teamViewerInfo.value = TeamViewerInfo("", "")
-                        _error.value = "No TeamViewer response"
+                        _error.value = "Failed to get TeamViewer info"
                     }
-                } else {
-                    android.util.Log.d("HomeViewModel", "TeamViewer API failed - showing retry button")
-                    _teamViewerInfo.value = TeamViewerInfo("", "")
-                    _error.value = "Failed to get TeamViewer info"
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("HomeViewModel", "TeamViewer API exception: ${e.message}", e)
-                _teamViewerInfo.value = TeamViewerInfo("", "")
-                _error.value = "Error getting TeamViewer info: ${e.message}"
+                )
             } finally {
                 _loading.value = false
-                android.util.Log.d("HomeViewModel", "getTeamViewer() completed")
+                Log.d("HomeViewModel", "getTeamViewer() completed")
             }
         }
     }
@@ -173,12 +314,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.openSelector()
-                if (!response.isSuccessful) {
-                    _error.value = "Failed to open selector"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.openSelector() },
+                    onError = { _error.value = "Failed to open selector" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -189,12 +329,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.toggleHandTracking()
-                if (!response.isSuccessful) {
-                    _error.value = "Failed to toggle hand tracking"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.toggleHandTracking() },
+                    onError = { _error.value = "Failed to toggle hand tracking" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -205,12 +344,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.lockSystem()
-                if (!response.isSuccessful) {
-                    _error.value = "Failed to lock system"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.lockSystem() },
+                    onError = { _error.value = "Failed to lock system" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -221,28 +359,46 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.panicShutdown()
-                if (!response.isSuccessful) {
-                    _error.value = "Failed to shutdown system"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.panicShutdown() },
+                    onError = { _error.value = "Failed to shutdown system" }
+                )
             } finally {
                 _loading.value = false
             }
         }
     }
 
-    // System Status
+    fun quitServer() {
+        viewModelScope.launch {
+            try {
+                _loading.value = true
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.quitServer() },
+                    onError = { _error.value = "Failed to quit server" }
+                )
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    // ================================
+    // SYSTEM STATUS
+    // ================================
+
     fun loadSystemStatus() {
         viewModelScope.launch {
             try {
-                val response = ApiClient.apiService.getSystemStatus()
-                if (response.isSuccessful) {
-                    response.body()?.let {
-                        _systemStatus.value = it
-                    }
-                }
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.getSystemStatus() },
+                    onSuccess = { status ->
+                        _systemStatus.value = status
+                    },
+                    onError = { _error.value = "Error loading system status: $it" }
+                )
             } catch (e: Exception) {
                 _error.value = "Error loading system status: ${e.message}"
             }
@@ -252,54 +408,56 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun setBrightness(level: Int) {
         viewModelScope.launch {
             try {
-                val response = ApiClient.apiService.setBrightness(level)
-                if (response.isSuccessful) {
-                    loadSystemStatus()
-                } else {
-                    _error.value = "Failed to set brightness"
-                }
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.setBrightness(level) },
+                    onSuccess = {
+                        loadSystemStatus()
+                    },
+                    onError = { _error.value = "Failed to set brightness" }
+                )
             } catch (e: Exception) {
                 _error.value = "Error: ${e.message}"
             }
         }
     }
 
-    // Custom Functions - Modified
+    // ================================
+    // CUSTOM FUNCTIONS
+    // ================================
+
     fun loadCustomFunctions() {
         viewModelScope.launch {
             try {
-                val response = ApiClient.apiService.getCustomFunctions()
-                if (response.isSuccessful) {
-                    response.body()?.let {
-                        _customFunctions.value = it
-                    }
-                }
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.getCustomFunctions() },
+                    onSuccess = { functions ->
+                        _customFunctions.value = functions
+                    },
+                    onError = { _error.value = "Error loading custom functions: $it" }
+                )
             } catch (e: Exception) {
                 _error.value = "Error loading custom functions: ${e.message}"
             }
         }
     }
 
-    // Modified to accept script filename instead of script content
     fun addCustomFunction(name: String, color: String, scriptFile: String, iconRes: Int) {
         viewModelScope.launch {
             try {
                 _loading.value = true
 
-                // Convert iconRes to icon name
                 val iconName = getIconNameFromResource(iconRes)
-
                 val request = com.ivans.remotecontrol.network.CreateCustomFunctionRequest(
                     name, color, scriptFile, iconName
                 )
-                val response = ApiClient.apiService.createCustomFunction(request)
-                if (response.isSuccessful) {
-                    loadCustomFunctions() // Reload the list
-                } else {
-                    _error.value = "Failed to create custom function"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.createCustomFunction(request) },
+                    onSuccess = {
+                        loadCustomFunctions() // Reload the list
+                    },
+                    onError = { _error.value = "Failed to create custom function" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -331,28 +489,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.executeCustomFunction(functionId)
-                if (!response.isSuccessful) {
-                    _error.value = "Failed to execute custom function"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
-            } finally {
-                _loading.value = false
-            }
-        }
-    }
 
-    fun quitServer() {
-        viewModelScope.launch {
-            try {
-                _loading.value = true
-                val response = ApiClient.apiService.quitServer() // You'll need to add this to ApiService
-                if (!response.isSuccessful) {
-                    _error.value = "Failed to quit server"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.executeCustomFunction(functionId) },
+                    onError = { _error.value = "Failed to execute custom function" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -363,14 +504,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _loading.value = true
-                val response = ApiClient.apiService.deleteCustomFunction(functionId)
-                if (response.isSuccessful) {
-                    loadCustomFunctions() // Reload the list
-                } else {
-                    _error.value = "Failed to delete custom function"
-                }
-            } catch (e: Exception) {
-                _error.value = "Error: ${e.message}"
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.deleteCustomFunction(functionId) },
+                    onSuccess = {
+                        loadCustomFunctions() // Reload the list
+                    },
+                    onError = { _error.value = "Failed to delete custom function" }
+                )
             } finally {
                 _loading.value = false
             }
@@ -380,19 +521,47 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun removeCustomFunction(functionId: Int) {
         viewModelScope.launch {
             try {
-                val response = ApiClient.apiService.removeCustomFunction(functionId)
-                if (response.isSuccessful) {
-                    loadCustomFunctions() // Reload the list to update UI
-                } else {
-                    _error.value = "Failed to remove function"
-                }
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.removeCustomFunction(functionId) },
+                    onSuccess = {
+                        loadCustomFunctions() // Reload the list to update UI
+                    },
+                    onError = { _error.value = "Failed to remove function" }
+                )
             } catch (e: Exception) {
                 _error.value = "Failed to remove function: ${e.message}"
             }
         }
     }
 
+    // ================================
+    // UTILITY METHODS
+    // ================================
+
     fun clearError() {
         _error.value = null
+    }
+
+    fun clearAuthenticationRequired() {
+        _authenticationRequired.value = false
+    }
+
+    fun refreshData() {
+        checkConnectionAndLoadData()
+    }
+
+    fun getSessionTimeRemaining(): Long {
+        return preferencesManager.getSessionTimeRemaining()
+    }
+
+    fun hasValidSession(): Boolean {
+        return ApiClient.hasValidSession()
+    }
+
+    enum class ConnectionStatus {
+        CONNECTING,
+        CONNECTED,
+        DISCONNECTED,
+        ERROR
     }
 }
