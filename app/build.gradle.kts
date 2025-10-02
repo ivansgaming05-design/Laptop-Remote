@@ -56,6 +56,8 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.gridlayout:gridlayout:1.0.0")
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // Lifecycle components
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.7.0")

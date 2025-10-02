@@ -40,7 +40,7 @@
         android:lineSpacingMultiplier="1.2"
         android:layout_marginBottom="8dp" />
 
-    <!-- Time Info - Fixed height to prevent jittering -->
+    <!-- Time Info -->
     <TextView
         android:id="@+id/textTimeInfo"
         android:layout_width="wrap_content"
@@ -77,6 +77,18 @@
 
     </com.google.android.material.textfield.TextInputLayout>
 
+    <!-- Biometric Button (moved outside TextInputLayout) -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/buttonBiometric"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Use Fingerprint"
+        android:visibility="gone"
+        app:icon="@android:drawable/ic_secure"
+        app:iconGravity="start"
+        style="@style/Widget.Material3.Button.TonalButton" />
+
     <!-- Remember Password Checkbox -->
     <CheckBox
         android:id="@+id/checkboxRemember"
@@ -87,7 +99,17 @@
         android:textColor="?attr/colorOnSurfaceVariant"
         android:buttonTint="?attr/colorPrimary" />
 
-    <!-- Progress Bar - Fixed height container -->
+    <!-- Biometric Checkbox -->
+    <CheckBox
+        android:id="@+id/checkboxBiometric"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Enable fingerprint unlock"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:buttonTint="?attr/colorPrimary"
+        android:visibility="gone" />
+
+    <!-- Progress Bar -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="32dp"

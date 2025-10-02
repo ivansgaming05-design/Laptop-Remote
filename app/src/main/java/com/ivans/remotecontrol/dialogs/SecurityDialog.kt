@@ -1,4 +1,3 @@
-// SecurityDialog.kt - Fixed version with proper dismissal
 package com.ivans.remotecontrol.dialogs
 
 import android.app.Dialog
@@ -22,6 +21,8 @@ import com.google.android.material.textfield.TextInputLayout
 import com.ivans.remotecontrol.R
 import com.ivans.remotecontrol.network.ApiClient
 import com.ivans.remotecontrol.utils.PreferencesManager
+import com.ivans.remotecontrol.utils.SecurePreferencesManager
+import com.ivans.remotecontrol.utils.BiometricHelper
 import kotlinx.coroutines.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -31,7 +32,7 @@ class SecurityDialog : DialogFragment() {
 
     companion object {
         private const val TAG = "SecurityDialog"
-        private var isShowing = false // Add class-level flag
+        private var isShowing = false
 
         fun show(fragmentManager: FragmentManager, onUnlocked: (String) -> Unit) {
             if (isShowing) {
@@ -39,7 +40,6 @@ class SecurityDialog : DialogFragment() {
                 return
             }
 
-            // Dismiss any existing security dialog first
             val existingDialog = fragmentManager.findFragmentByTag(TAG) as? SecurityDialog
             existingDialog?.dismissAllowingStateLoss()
 
@@ -59,22 +59,23 @@ class SecurityDialog : DialogFragment() {
     private lateinit var passwordLayout: TextInputLayout
     private lateinit var unlockButton: Button
     private lateinit var cancelButton: Button
+    private lateinit var biometricButton: Button
     private lateinit var progressBar: ProgressBar
     private lateinit var timeInfoText: TextView
     private lateinit var rememberCheckbox: CheckBox
+    private lateinit var biometricCheckbox: CheckBox
 
     private lateinit var preferencesManager: PreferencesManager
+    private lateinit var securePreferencesManager: SecurePreferencesManager // NEW
+    private lateinit var biometricHelper: BiometricHelper
     private var currentChallenge: String? = null
     private var unlockJob: Job? = null
     private var isUnlocking = false
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val dialog = super.onCreateDialog(savedInstanceState)
-
-        // Make dialog non-cancelable but don't try to set overlay type
         dialog.setCancelable(false)
         dialog.setCanceledOnTouchOutside(false)
-
         return dialog
     }
 
@@ -90,6 +91,8 @@ class SecurityDialog : DialogFragment() {
         super.onViewCreated(view, savedInstanceState)
 
         preferencesManager = PreferencesManager(requireContext())
+        securePreferencesManager = SecurePreferencesManager(requireContext()) // NEW
+        biometricHelper = BiometricHelper(requireContext())
 
         initViews(view)
         setupViews()
@@ -101,20 +104,25 @@ class SecurityDialog : DialogFragment() {
         passwordLayout = view.findViewById(R.id.passwordLayout)
         unlockButton = view.findViewById(R.id.buttonUnlock)
         cancelButton = view.findViewById(R.id.buttonCancel)
+        biometricButton = view.findViewById(R.id.buttonBiometric)
         progressBar = view.findViewById(R.id.progressBar)
         timeInfoText = view.findViewById(R.id.textTimeInfo)
         rememberCheckbox = view.findViewById(R.id.checkboxRemember)
+        biometricCheckbox = view.findViewById(R.id.checkboxBiometric)
     }
 
     private fun setupViews() {
-        // Load remembered password if available
-        val rememberedPassword = preferencesManager.getRememberedPassword()
+        // Load remembered password if available (from SECURE storage)
+        val rememberedPassword = securePreferencesManager.getRememberedPassword()
         if (rememberedPassword.isNotEmpty()) {
             passwordInput.setText(rememberedPassword)
             rememberCheckbox.isChecked = true
         }
 
-        // Setup text watcher for password input
+        biometricCheckbox.isChecked = preferencesManager.isBiometricEnabled()
+
+        updateBiometricButtonVisibility()
+
         passwordInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -124,32 +132,92 @@ class SecurityDialog : DialogFragment() {
             override fun afterTextChanged(s: Editable?) {}
         })
 
-        // Setup button listeners
         unlockButton.setOnClickListener {
             if (!isUnlocking) {
-                attemptUnlock()
+                attemptUnlock(viaPassword = true)
             }
         }
+
+        biometricButton.setOnClickListener {
+            attemptBiometricUnlock()
+        }
+
         cancelButton.setOnClickListener {
-            // For security dialog, cancel should minimize app or similar
             activity?.moveTaskToBack(true)
         }
 
-        // Enter key should trigger unlock
         passwordInput.setOnEditorActionListener { _, _, _ ->
             if (unlockButton.isEnabled && !isUnlocking) {
-                attemptUnlock()
+                attemptUnlock(viaPassword = true)
                 true
             } else {
                 false
             }
         }
 
-        // Focus on password input
         passwordInput.requestFocus()
-
-        // Show keyboard
         dialog?.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+
+        if (shouldAutoShowBiometric()) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (isAdded) {
+                    attemptBiometricUnlock()
+                }
+            }, 500)
+        }
+    }
+
+    private fun updateBiometricButtonVisibility() {
+        val canUseBiometric = biometricHelper.canUseBiometric()
+        val hasAuthToday = preferencesManager.hasPasswordAuthToday()
+        val biometricEnabled = preferencesManager.isBiometricEnabled()
+        val hasBiometricPassword = securePreferencesManager.hasBiometricPassword()
+
+        biometricButton.visibility = if (canUseBiometric && hasAuthToday && biometricEnabled && hasBiometricPassword) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+
+        biometricCheckbox.visibility = if (canUseBiometric) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+    }
+
+    private fun shouldAutoShowBiometric(): Boolean {
+        return biometricHelper.canUseBiometric() &&
+                preferencesManager.hasPasswordAuthToday() &&
+                preferencesManager.isBiometricEnabled() &&
+                securePreferencesManager.hasBiometricPassword()
+    }
+
+    private fun attemptBiometricUnlock() {
+        if (!preferencesManager.hasPasswordAuthToday()) {
+            timeInfoText.text = "Please enter password first today"
+            return
+        }
+
+        val biometricPassword = securePreferencesManager.getBiometricPassword()
+        if (biometricPassword.isEmpty()) {
+            timeInfoText.text = "No saved password for biometric. Enable biometric and enter password once."
+            return
+        }
+
+        biometricHelper.showBiometricPrompt(
+            activity = requireActivity(),
+            onSuccess = {
+                passwordInput.setText(biometricPassword)
+                attemptUnlock(viaPassword = false)
+            },
+            onError = { error ->
+                timeInfoText.text = "Biometric error: $error"
+            },
+            onCancel = {
+                timeInfoText.text = "Biometric cancelled. Use password."
+            }
+        )
     }
 
     private fun checkAuthStatus() {
@@ -160,7 +228,7 @@ class SecurityDialog : DialogFragment() {
                 val response = ApiClient.apiService.getAuthStatus()
 
                 withContext(Dispatchers.Main) {
-                    if (!isAdded) return@withContext // Check if fragment is still attached
+                    if (!isAdded) return@withContext
 
                     setLoading(false)
 
@@ -171,11 +239,9 @@ class SecurityDialog : DialogFragment() {
                             if (authStatus.temporarilyLocked == true && authStatus.retryAfter != null) {
                                 handleTemporaryLock(authStatus.retryAfter)
                             } else {
-                                // Server is locked, get challenge
                                 getChallenge()
                             }
                         } else {
-                            // Server is not locked, dismiss dialog
                             Log.d(TAG, "Server not locked, dismissing dialog")
                             successfulUnlock("")
                         }
@@ -212,13 +278,13 @@ class SecurityDialog : DialogFragment() {
                         if (currentChallenge != null) {
                             updateTimeInfo("Challenge received. Enter your password to unlock.")
                             unlockButton.isEnabled = passwordInput.text?.isNotEmpty() == true && !isUnlocking
+                            updateBiometricButtonVisibility()
                         } else {
                             showError("Failed to get security challenge")
                         }
                     } else {
                         val errorBody = response.errorBody()?.string()
                         if (response.code() == 429) {
-                            // Parse retry after from error response
                             try {
                                 val errorData = com.google.gson.Gson().fromJson(errorBody,
                                     com.google.gson.JsonObject::class.java)
@@ -242,8 +308,8 @@ class SecurityDialog : DialogFragment() {
         }
     }
 
-    private fun attemptUnlock() {
-        if (isUnlocking) return // Prevent multiple attempts
+    private fun attemptUnlock(viaPassword: Boolean) {
+        if (isUnlocking) return
 
         val password = passwordInput.text.toString().trim()
         val challenge = currentChallenge
@@ -264,7 +330,6 @@ class SecurityDialog : DialogFragment() {
 
         unlockJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Generate HMAC-SHA256 response
                 val response = generateHMACResponse(password, challenge)
 
                 val unlockResponse = ApiClient.apiService.unlockServer(
@@ -282,17 +347,28 @@ class SecurityDialog : DialogFragment() {
                         val sessionToken = unlockData?.sessionToken
 
                         if (sessionToken != null) {
-                            // Save session token
                             preferencesManager.setSessionToken(sessionToken)
 
-                            // Save password if checkbox is checked
+                            // Save to SECURE storage if remember is checked
                             if (rememberCheckbox.isChecked) {
-                                preferencesManager.setRememberedPassword(password)
+                                securePreferencesManager.setRememberedPassword(password)
                             } else {
-                                preferencesManager.clearRememberedPassword()
+                                securePreferencesManager.clearRememberedPassword()
                             }
 
-                            // Success!
+                            // Save to SECURE biometric storage if enabled
+                            if (biometricCheckbox.isChecked) {
+                                securePreferencesManager.setBiometricPassword(password)
+                                preferencesManager.setBiometricEnabled(true)
+                            } else {
+                                securePreferencesManager.clearBiometricPassword()
+                                preferencesManager.setBiometricEnabled(false)
+                            }
+
+                            if (viaPassword) {
+                                preferencesManager.setLastPasswordAuthDate()
+                            }
+
                             Log.d(TAG, "Authentication successful, dismissing dialog")
                             successfulUnlock(sessionToken)
                         } else {
@@ -304,8 +380,6 @@ class SecurityDialog : DialogFragment() {
                         if (unlockResponse.code() == 401) {
                             passwordLayout.error = "Incorrect password"
                             passwordInput.selectAll()
-
-                            // Get new challenge for next attempt
                             getChallenge()
                         } else if (unlockResponse.code() == 429) {
                             try {
@@ -350,8 +424,6 @@ class SecurityDialog : DialogFragment() {
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(secretKeySpec)
             val hmacBytes = mac.doFinal(challenge.toByteArray(Charsets.UTF_8))
-
-            // Convert to hex string
             hmacBytes.joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
             throw RuntimeException("Failed to generate HMAC response", e)
@@ -360,11 +432,10 @@ class SecurityDialog : DialogFragment() {
 
     private fun handleTemporaryLock(retryAfterSeconds: Int) {
         unlockButton.isEnabled = false
+        biometricButton.isEnabled = false
         passwordInput.isEnabled = false
 
         updateTimeInfo("Too many failed attempts. Try again in $retryAfterSeconds seconds.")
-
-        // Start countdown
         startCountdown(retryAfterSeconds)
     }
 
@@ -374,15 +445,15 @@ class SecurityDialog : DialogFragment() {
 
         val countdownRunnable = object : Runnable {
             override fun run() {
-                if (!isAdded) return // Stop if fragment is detached
+                if (!isAdded) return
 
                 if (remainingSeconds > 0) {
                     updateTimeInfo("Too many failed attempts. Try again in $remainingSeconds seconds.")
                     remainingSeconds--
                     handler.postDelayed(this, 1000)
                 } else {
-                    // Re-enable input and get new challenge
                     unlockButton.isEnabled = passwordInput.text?.isNotEmpty() == true && !isUnlocking
+                    biometricButton.isEnabled = true
                     passwordInput.isEnabled = true
                     updateTimeInfo("You can now try again.")
                     getChallenge()
@@ -396,6 +467,7 @@ class SecurityDialog : DialogFragment() {
     private fun setLoading(loading: Boolean, message: String = "") {
         progressBar.visibility = if (loading) View.VISIBLE else View.GONE
         unlockButton.isEnabled = !loading && passwordInput.text?.isNotEmpty() == true && !isUnlocking
+        biometricButton.isEnabled = !loading
         passwordInput.isEnabled = !loading
 
         if (loading && message.isNotEmpty()) {
@@ -422,6 +494,6 @@ class SecurityDialog : DialogFragment() {
     override fun onDestroy() {
         super.onDestroy()
         unlockJob?.cancel()
-        isShowing = false // Reset flag when dialog is destroyed
+        isShowing = false
     }
 }
