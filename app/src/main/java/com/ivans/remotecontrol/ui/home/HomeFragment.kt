@@ -11,7 +11,6 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.viewModels
 import androidx.gridlayout.widget.GridLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -19,20 +18,17 @@ import com.google.android.material.slider.Slider
 import com.google.android.material.snackbar.Snackbar
 import com.ivans.remotecontrol.R
 import com.ivans.remotecontrol.dialogs.AddFunctionDialog
-import com.ivans.remotecontrol.dialogs.ScreenshotDialog
 import com.ivans.remotecontrol.models.CustomFunction
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.VibrationEffect
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.ViewModel
 import android.widget.Toast
 import com.ivans.remotecontrol.utils.PreferencesManager
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import com.ivans.remotecontrol.MainActivity
-import com.ivans.remotecontrol.dialogs.SecurityDialog
+import androidx.core.graphics.toColorInt
 
 class HomeFragment : Fragment() {
 
@@ -44,7 +40,6 @@ class HomeFragment : Fragment() {
     private lateinit var expandableContent: LinearLayout
     private lateinit var expandHandle: LinearLayout
     private lateinit var brightnessSlider: Slider
-    private lateinit var statusText: TextView
     private lateinit var screenshotButton: MaterialButton
 
     // TeamViewer temporary buttons
@@ -81,7 +76,7 @@ class HomeFragment : Fragment() {
 
         // Create connection status indicator with proper styling
         connectionStatusIndicator = TextView(requireContext()).apply {
-            text = "⚫ Checking connection..."
+            "⚫ Checking connection...".also { text = it }
             textSize = 14f
             setTextColor(ContextCompat.getColor(context, R.color.text_primary))
             gravity = android.view.Gravity.CENTER
@@ -418,12 +413,12 @@ class HomeFragment : Fragment() {
         }
 
         viewModel.teamViewerInfo.observe(viewLifecycleOwner) { teamViewerInfo ->
-            android.util.Log.d("HomeFragment", "TeamViewer info received: ID='${teamViewerInfo.id}', Password='${teamViewerInfo.password}'")
+            Log.d("HomeFragment", "TeamViewer info received: ID='${teamViewerInfo.id}', Password='${teamViewerInfo.password}'")
             if (teamViewerInfo.id.isNotEmpty() || teamViewerInfo.password.isNotEmpty()) {
-                android.util.Log.d("HomeFragment", "Calling showTemporaryTeamViewerButtons")
+                Log.d("HomeFragment", "Calling showTemporaryTeamViewerButtons")
                 showTemporaryTeamViewerButtons(teamViewerInfo)
             } else {
-                android.util.Log.d("HomeFragment", "TeamViewer info is empty - should trigger retry button")
+                Log.d("HomeFragment", "TeamViewer info is empty - should trigger retry button")
                 showTemporaryTeamViewerButtons(teamViewerInfo)
             }
         }
@@ -454,8 +449,8 @@ class HomeFragment : Fragment() {
     }
 
     private fun showTemporaryTeamViewerButtons(teamViewerInfo: com.ivans.remotecontrol.models.TeamViewerInfo) {
-        android.util.Log.d("TeamViewer", "showTemporaryTeamViewerButtons called")
-        android.util.Log.d("TeamViewer", "ID: '${teamViewerInfo.id}', Password: '${teamViewerInfo.password}'")
+        Log.d("TeamViewer", "showTemporaryTeamViewerButtons called")
+        Log.d("TeamViewer", "ID: '${teamViewerInfo.id}', Password: '${teamViewerInfo.password}'")
 
         hasIdBeenCopied = false
         hasPasswordBeenCopied = false
@@ -468,7 +463,7 @@ class HomeFragment : Fragment() {
 
         // Check if we got valid info
         val hasValidInfo = teamViewerInfo.id.isNotEmpty() && teamViewerInfo.password.isNotEmpty()
-        android.util.Log.d("TeamViewer", "hasValidInfo: $hasValidInfo")
+        Log.d("TeamViewer", "hasValidInfo: $hasValidInfo")
 
         teamViewerButtonsContainer = LinearLayout(requireContext()).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -486,8 +481,8 @@ class HomeFragment : Fragment() {
         }
 
         if (hasValidInfo) {
-            android.util.Log.d("TeamViewer", "Showing ID and Password buttons")
-            val teamViewerButtonHeight = 54 * resources.displayMetrics.density.toInt()
+            Log.d("TeamViewer", "Showing ID and Password buttons")
+            val teamViewerButtonHeight = 58 * resources.displayMetrics.density.toInt()
 
             copyIdButton = MaterialButton(requireContext()).apply {
                 text = teamViewerInfo.id
@@ -502,7 +497,7 @@ class HomeFragment : Fragment() {
                     setMargins(0, 0, 4, 0)
                 }
                 setOnClickListener {
-                    android.util.Log.d("TeamViewer", "ID button clicked")
+                    Log.d("TeamViewer", "ID button clicked")
                     copyToClipboard("TeamViewer ID", teamViewerInfo.id)
                     showMessage("ID copied: ${teamViewerInfo.id}")
                     hasIdBeenCopied = true
@@ -522,7 +517,7 @@ class HomeFragment : Fragment() {
                     setMargins(4, 0, 0, 0)
                 }
                 setOnClickListener {
-                    android.util.Log.d("TeamViewer", "Password button clicked")
+                    Log.d("TeamViewer", "Password button clicked")
                     copyToClipboard("TeamViewer Password", teamViewerInfo.password)
                     showMessage("Password copied: ${teamViewerInfo.password}")
                     hasPasswordBeenCopied = true
@@ -534,11 +529,11 @@ class HomeFragment : Fragment() {
             teamViewerButtonsContainer?.addView(copyIdButton)
             teamViewerButtonsContainer?.addView(copyPasswordButton)
         } else {
-            android.util.Log.d("TeamViewer", "Showing retry button")
+            Log.d("TeamViewer", "Showing retry button")
             val teamViewerButtonHeight = 54 * resources.displayMetrics.density.toInt()
 
             retryTeamViewerButton = MaterialButton(requireContext()).apply {
-                text = "Retry TeamViewer"
+                "Retry TeamViewer".also { text = it }
                 setBackgroundColor(ContextCompat.getColor(context, R.color.blue_500))
                 setTextColor(ContextCompat.getColor(context, android.R.color.white))
                 elevation = 4f
@@ -547,7 +542,7 @@ class HomeFragment : Fragment() {
                     teamViewerButtonHeight
                 )
                 setOnClickListener {
-                    android.util.Log.d("TeamViewer", "Retry button clicked")
+                    Log.d("TeamViewer", "Retry button clicked")
                     hideTeamViewerButtons()
                     viewModel.getTeamViewer()
                     showMessage("Retrying TeamViewer connection...")
@@ -580,7 +575,7 @@ class HomeFragment : Fragment() {
             ?.setInterpolator(android.view.animation.DecelerateInterpolator()) // Smooth deceleration
             ?.start()
 
-        android.util.Log.d("TeamViewer", "TeamViewer buttons added with slide animation")
+        Log.d("TeamViewer", "TeamViewer buttons added with slide animation")
 
         // Auto-hide after 15 seconds if user doesn't interact
         view?.postDelayed({
@@ -624,7 +619,7 @@ class HomeFragment : Fragment() {
         }
 
         retryTeamViewerButton = MaterialButton(requireContext()).apply {
-            text = "Retry TeamViewer"
+            "Retry TeamViewer".also { text = it }
             setBackgroundColor(ContextCompat.getColor(context, R.color.blue_500)) // Same as ID button
             setTextColor(ContextCompat.getColor(context, android.R.color.white))
             layoutParams = LinearLayout.LayoutParams(
@@ -695,7 +690,7 @@ class HomeFragment : Fragment() {
 
                 // Parse the color properly
                 try {
-                    setBackgroundColor(android.graphics.Color.parseColor(function.color))
+                    setBackgroundColor(function.color.toColorInt())
                 } catch (e: Exception) {
                     // Fallback to a default color if parsing fails
                     setBackgroundColor(ContextCompat.getColor(context, R.color.blue_500))
@@ -832,9 +827,9 @@ class HomeFragment : Fragment() {
 
                     // Update text and apply the rounded background
                     if (isConnected) {
-                        text = "🟢 Connected"
+                        "🟢 Connected".also { text = it }
                     } else {
-                        text = "🔴 Disconnected"
+                        "🔴 Disconnected".also { text = it }
                     }
 
                     background = drawable

@@ -2,7 +2,6 @@
 package com.ivans.remotecontrol.dialogs
 
 import android.app.Dialog
-import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -24,8 +23,6 @@ import com.ivans.remotecontrol.R
 import com.ivans.remotecontrol.network.ApiClient
 import com.ivans.remotecontrol.utils.PreferencesManager
 import kotlinx.coroutines.*
-import java.security.MessageDigest
-import java.util.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import android.util.Log
@@ -349,8 +346,8 @@ class SecurityDialog : DialogFragment() {
 
     private fun generateHMACResponse(password: String, challenge: String): String {
         return try {
-            val secretKeySpec = javax.crypto.spec.SecretKeySpec(password.toByteArray(Charsets.UTF_8), "HmacSHA256")
-            val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+            val secretKeySpec = SecretKeySpec(password.toByteArray(Charsets.UTF_8), "HmacSHA256")
+            val mac = Mac.getInstance("HmacSHA256")
             mac.init(secretKeySpec)
             val hmacBytes = mac.doFinal(challenge.toByteArray(Charsets.UTF_8))
 
