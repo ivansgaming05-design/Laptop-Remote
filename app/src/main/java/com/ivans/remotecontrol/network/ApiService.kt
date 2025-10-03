@@ -64,6 +64,9 @@ interface ApiService {
     @GET("api/custom-functions")
     suspend fun getCustomFunctions(): Response<List<CustomFunction>>
 
+    @POST("api/song-request")
+    suspend fun requestSong(@Body request: Map<String, String>): Response<Map<String, Any>>
+
     @POST("api/custom-functions")
     suspend fun createCustomFunction(@Body request: CreateCustomFunctionRequest): Response<Map<String, Any>>
 

@@ -90,6 +90,7 @@
     <color name="text_primary">#FFFFFF</color>
     <color name="red_600">#E53E3E</color>
     <color name="green_600">#38A169</color>
+    <color name="text_secondary">#B0B0B0</color>
     <!-- Bottom Navigation Colors -->
     <color name="bottom_nav_color">@color/md_theme_dark_onSurfaceVariant</color>
 </resources>

@@ -158,13 +158,20 @@ class HomeFragment : Fragment() {
                 val vibratorManager = requireContext().getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
                 vibratorManager.defaultVibrator
             } else {
+                @Suppress("DEPRECATION")
                 requireContext().getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createOneShot(50, 255))
+                // Create a stronger vibration effect
+                val vibrationEffect = VibrationEffect.createOneShot(
+                    100,  // Duration in milliseconds (increased from 50)
+                    VibrationEffect.DEFAULT_AMPLITUDE  // Use device's default amplitude (stronger than 255)
+                )
+                vibrator.vibrate(vibrationEffect)
             } else {
-                vibrator.vibrate(200)
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(100)  // Increased from 50ms
             }
         }
     }
@@ -206,6 +213,7 @@ class HomeFragment : Fragment() {
             ButtonConfig("Screenshot", "Take a screenshot", R.drawable.ic_screenshot, ButtonType.NORMAL) { viewModel.takeScreenshot() },
             ButtonConfig("TeamViewer", "Get remote access info", R.drawable.ic_teamviewer, ButtonType.NORMAL) { viewModel.getTeamViewer() },
             ButtonConfig("Selector", "Activate selection tool", R.drawable.ic_selector, ButtonType.NORMAL) { viewModel.openSelector() },
+            ButtonConfig("Song Request", "Request a song for REPO", R.drawable.ic_music, ButtonType.NORMAL) { showSongRequestDialog() },
             ButtonConfig("Hand Tracking", "Start hand tracking", R.drawable.ic_hand, ButtonType.NORMAL) { viewModel.toggleHandTracking() },
             ButtonConfig("Quit Bot", "Stop remote server", R.drawable.ic_quit, ButtonType.NORMAL) { viewModel.quitServer() },
             ButtonConfig("Lock", "Lock the computer", R.drawable.ic_lock, ButtonType.NORMAL) { viewModel.lockSystem() },
@@ -677,22 +685,21 @@ class HomeFragment : Fragment() {
         }
 
         // Calculate starting position for new custom buttons
-        var currentPosition = 9
+        // After removing "Add Function", we have 10 base buttons (positions 0-9)
+        // Custom buttons should start at position 10
+        var currentPosition = 10  // FIXED: Simply use 10 instead of dynamic calculation
 
         functions.forEach { function ->
             val button = MaterialButton(requireContext()).apply {
                 text = function.name
-                // CHANGE THIS LINE - Use the stored icon resource instead of default
-                setIconResource(getIconResourceFromName(function.iconName)) // fallback to default if null
+                setIconResource(getIconResourceFromName(function.iconName))
                 iconGravity = MaterialButton.ICON_GRAVITY_TOP
                 iconSize = resources.getDimensionPixelSize(R.dimen.button_icon_size)
                 iconTint = ContextCompat.getColorStateList(context, android.R.color.white)
 
-                // Parse the color properly
                 try {
                     setBackgroundColor(function.color.toColorInt())
                 } catch (e: Exception) {
-                    // Fallback to a default color if parsing fails
                     setBackgroundColor(ContextCompat.getColor(context, R.color.blue_500))
                 }
 
@@ -701,12 +708,10 @@ class HomeFragment : Fragment() {
                 isAllCaps = false
                 textSize = 12f
 
-                // Regular click - execute function
                 setOnClickListener {
                     viewModel.executeCustomFunction(function.id.toString())
                 }
 
-                // Long click - show removal option
                 setOnLongClickListener {
                     androidx.appcompat.app.AlertDialog.Builder(requireContext())
                         .setTitle("Remove Custom Function")
@@ -726,7 +731,6 @@ class HomeFragment : Fragment() {
                 )
             }
 
-            // Calculate row and column for current position
             val row = currentPosition / 2
             val column = currentPosition % 2
 
@@ -844,6 +848,35 @@ class HomeFragment : Fragment() {
                 checkConnectionStatus()
             }
         }, 10000)
+    }
+
+    private fun showSongRequestDialog() {
+        val input = android.widget.EditText(requireContext()).apply {
+            hint = "Enter song name or artist"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setPadding(60, 40, 60, 40)
+
+            // Set text appearance
+            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(context, R.color.text_secondary))
+        }
+
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("Song Request for REPO")
+            .setMessage("Enter the song you want to play:")
+            .setView(input)
+            .setPositiveButton("Request") { _, _ ->
+                val songQuery = input.text.toString().trim()
+                if (songQuery.isNotEmpty()) {
+                    performVibration()
+                    viewModel.requestSong(songQuery)
+                    showMessage("Requesting: $songQuery")
+                } else {
+                    showError("Please enter a song name")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     data class ButtonConfig(

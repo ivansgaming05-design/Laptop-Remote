@@ -538,6 +538,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // UTILITY METHODS
     // ================================
 
+    fun requestSong(songQuery: String) {
+        viewModelScope.launch {
+            try {
+                _loading.value = true
+
+                executeWithAuthCheck(
+                    apiCall = { ApiClient.apiService.requestSong(mapOf("song" to songQuery)) },
+                    onSuccess = { response ->
+                        val message = response["message"] as? String ?: "Song link copied to clipboard"
+                        _error.value = null
+                        // You could add a success LiveData if you want specific success messages
+                    },
+                    onError = { _error.value = "Failed to request song" }
+                )
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
     fun clearError() {
         _error.value = null
     }
