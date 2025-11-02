@@ -47,7 +47,6 @@ object ApiClient {
                 // Skip auth for specific endpoints
                 val skipAuthPaths = listOf(
                     "/api/ping",
-                    "/api/auth/status",
                     "/api/auth/challenge",
                     "/api/auth/unlock"
                 )

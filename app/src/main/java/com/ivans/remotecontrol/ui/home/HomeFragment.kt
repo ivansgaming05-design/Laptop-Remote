@@ -324,6 +324,7 @@ class HomeFragment : Fragment() {
         }
 
         expandHandle.setOnClickListener {
+            performVibration()
             togglePanel()
         }
     }
@@ -348,6 +349,7 @@ class HomeFragment : Fragment() {
                 override fun onStartTrackingTouch(slider: Slider) {}
 
                 override fun onStopTrackingTouch(slider: Slider) {
+                    performVibration()
                     viewModel.setBrightness(slider.value.toInt())
                 }
             })

@@ -30,6 +30,9 @@ import com.ivans.remotecontrol.utils.PreferencesManager
 import com.ivans.remotecontrol.dialogs.SecurityDialog
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 
 class MainActivity : AppCompatActivity() {
 
@@ -65,6 +68,30 @@ class MainActivity : AppCompatActivity() {
 
         // Check if we need authentication on startup
         checkInitialAuthentication()
+    }
+
+    private fun performVibration() {
+        val preferencesManager = PreferencesManager(this)
+        if (preferencesManager.getVibrationEnabled()) {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val vibrationEffect = VibrationEffect.createOneShot(
+                    100,
+                    VibrationEffect.DEFAULT_AMPLITUDE
+                )
+                vibrator.vibrate(vibrationEffect)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(100)
+            }
+        }
     }
 
     private fun requestNotificationPermission() {

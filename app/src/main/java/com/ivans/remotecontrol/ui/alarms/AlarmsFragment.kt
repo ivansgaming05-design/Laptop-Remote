@@ -17,6 +17,12 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.ivans.remotecontrol.R
 import com.ivans.remotecontrol.dialogs.AddAlarmDialog
 import com.ivans.remotecontrol.models.Alarm
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.content.Context
+import com.ivans.remotecontrol.utils.PreferencesManager
 
 class AlarmsFragment : Fragment() {
 
@@ -40,12 +46,36 @@ class AlarmsFragment : Fragment() {
         viewModel.loadAlarms()
     }
 
+    private fun performVibration() {
+        val preferencesManager = PreferencesManager(requireContext())
+        if (preferencesManager.getVibrationEnabled()) {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = requireContext().getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                requireContext().getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val vibrationEffect = VibrationEffect.createOneShot(
+                    100,
+                    VibrationEffect.DEFAULT_AMPLITUDE
+                )
+                vibrator.vibrate(vibrationEffect)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(100)
+            }
+        }
+    }
+
     private fun initViews(view: View) {
         recyclerView = view.findViewById(R.id.alarmsRecyclerView)
         addAlarmButton = view.findViewById(R.id.addAlarmFab)
 
-        // Fix this line - change addAlarmFab to addAlarmButton
         addAlarmButton.setOnClickListener {
+            performVibration()  // ADD THIS
             AddAlarmDialog.show(parentFragmentManager) { time, days ->
                 // Create an Alarm object from the dialog parameters
                 val timeParts = time.split(":")
@@ -61,7 +91,7 @@ class AlarmsFragment : Fragment() {
                     enabled = true
                 )
 
-                viewModel.addAlarm(newAlarm) // Pass the Alarm object
+                viewModel.addAlarm(newAlarm)
             }
         }
     }

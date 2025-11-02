@@ -13,6 +13,11 @@ import com.google.android.material.textfield.TextInputEditText
 import com.ivans.remotecontrol.R
 import com.ivans.remotecontrol.network.ApiClient
 import com.ivans.remotecontrol.utils.PreferencesManager
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.content.Context
 
 class SettingsFragment : Fragment() {
 
@@ -71,9 +76,34 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    private fun performVibration() {
+        if (preferencesManager.getVibrationEnabled()) {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = requireContext().getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                requireContext().getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val vibrationEffect = VibrationEffect.createOneShot(
+                    100,
+                    VibrationEffect.DEFAULT_AMPLITUDE
+                )
+                vibrator.vibrate(vibrationEffect)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(100)
+            }
+        }
+    }
+
     private fun setupClickListeners() {
         // Save URL button
         saveUrlButton.setOnClickListener {
+            performVibration()  // ADD THIS
+
             val url = serverUrlInput.text.toString().trim()
             if (url.isNotEmpty()) {
                 // Validate URL format
@@ -99,9 +129,14 @@ class SettingsFragment : Fragment() {
             }
         }
 
-        // Vibration switch
+        // Vibration switch - vibrate ONLY when turning ON
         vibrationSwitch.setOnCheckedChangeListener { _, isChecked ->
             preferencesManager.setVibrationEnabled(isChecked)
+
+            if (isChecked) {
+                performVibration()  // ADD THIS - only when enabling
+            }
+
             val message = if (isChecked) "Vibration enabled" else "Vibration disabled"
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }

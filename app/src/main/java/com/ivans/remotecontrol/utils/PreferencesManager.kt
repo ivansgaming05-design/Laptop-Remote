@@ -58,17 +58,14 @@ class PreferencesManager(context: Context) {
 
     fun setSessionToken(token: String) {
         prefs.edit().putString(KEY_SESSION_TOKEN, token).apply()
-        val expiryTime = System.currentTimeMillis() + (10 * 60 * 1000)
+        val expiryTime = System.currentTimeMillis() + (60 * 60 * 1000) // 1 hour to match server
         prefs.edit().putLong(KEY_SESSION_EXPIRES, expiryTime).apply()
     }
 
     fun getSessionToken(): String {
-        val token = prefs.getString(KEY_SESSION_TOKEN, "") ?: ""
-        if (token.isNotEmpty() && isSessionExpired()) {
-            clearSessionToken()
-            return ""
-        }
-        return token
+        // Return token without clearing - let server be source of truth
+        // The ApiClient will handle 401/423 responses and clear if needed
+        return prefs.getString(KEY_SESSION_TOKEN, "") ?: ""
     }
 
     fun clearSessionToken() {
