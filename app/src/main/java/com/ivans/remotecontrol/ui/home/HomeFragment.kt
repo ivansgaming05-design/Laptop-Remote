@@ -29,11 +29,12 @@ import android.os.VibratorManager
 import android.util.Log
 import com.ivans.remotecontrol.MainActivity
 import androidx.core.graphics.toColorInt
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class HomeFragment : Fragment() {
 
     private lateinit var viewModel: HomeViewModel
-
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var scrollView: ScrollView
     private lateinit var gridLayout: GridLayout
     private lateinit var expandablePanel: MaterialCardView
@@ -180,20 +181,19 @@ class HomeFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Initialize ViewModel first
         viewModel = ViewModelProvider(
             this,
             ViewModelProvider.AndroidViewModelFactory.getInstance(requireActivity().application)
         )[HomeViewModel::class.java]
 
         initViews(view)
+        setupSwipeRefresh(view)
         setupControlButtons()
         setupExpandablePanel()
         setupBrightnessSlider()
         setupObservers()
 
-        viewModel.loadSystemStatus()
-        viewModel.loadCustomFunctions()
+        refreshAllData()
     }
 
     override fun onResume() {
@@ -256,6 +256,44 @@ class HomeFragment : Fragment() {
             }
         }
         return null
+    }
+
+    private fun setupSwipeRefresh(view: View) {
+        // scrollView is already initialized by initViews(), just wrap it
+        val scrollViewParent = scrollView.parent as ViewGroup
+        val scrollViewIndex = scrollViewParent.indexOfChild(scrollView)
+        val scrollViewLayoutParams = scrollView.layoutParams
+
+        scrollViewParent.removeView(scrollView)
+
+        swipeRefreshLayout = SwipeRefreshLayout(requireContext()).apply {
+            setColorSchemeResources(
+                android.R.color.holo_purple,
+                android.R.color.holo_blue_dark,
+                android.R.color.holo_green_dark
+            )
+
+            addView(scrollView, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+
+            setOnRefreshListener {
+                performVibration()
+                refreshAllData()
+            }
+        }
+
+        scrollViewParent.addView(swipeRefreshLayout, scrollViewIndex, scrollViewLayoutParams)
+    }
+
+    private fun refreshAllData() {
+        Log.d("HomeFragment", "Refreshing all data...")
+        swipeRefreshLayout.isRefreshing = true
+
+        viewModel.loadSystemStatus()
+        viewModel.loadCustomFunctions()
+        checkConnectionStatus()
     }
 
     private fun createControlButton(config: ButtonConfig): MaterialButton {
@@ -417,6 +455,7 @@ class HomeFragment : Fragment() {
     private fun setupObservers() {
         viewModel.systemStatus.observe(viewLifecycleOwner) { status ->
             updateStatusDisplay(status)
+            swipeRefreshLayout.isRefreshing = false
             if (brightnessSlider.value.toInt() != status.brightness) {
                 brightnessSlider.value = status.brightness.toFloat()
             }
@@ -435,6 +474,14 @@ class HomeFragment : Fragment() {
 
         viewModel.customFunctions.observe(viewLifecycleOwner) { functions ->
             addCustomFunctionButtons(functions)
+            swipeRefreshLayout.isRefreshing = false
+        }
+
+        // Loading Observer
+        viewModel.loading.observe(viewLifecycleOwner) { isLoading ->
+            if (!isLoading) {
+                swipeRefreshLayout.isRefreshing = false  // NEW: Hide indicator
+            }
         }
 
         viewModel.authenticationRequired.observe(viewLifecycleOwner) { required ->
@@ -453,6 +500,9 @@ class HomeFragment : Fragment() {
 
         viewModel.error.observe(viewLifecycleOwner) { error ->
             error?.let {
+                swipeRefreshLayout.isRefreshing = false  // NEW: Hide indicator
+                Snackbar.make(requireView(), it, Snackbar.LENGTH_LONG).show()
+                viewModel.clearError()
                 showError(it)
             }
         }
